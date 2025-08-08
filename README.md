@@ -1,6 +1,6 @@
 # White Thing
 
-A minimal RTF text editor for macOS with customizable appearance and hover-activated controls.
+A minimal RTF text editor for macOS-allied fiction writers. Has customizable appearance and auto vanishing menu bar.
 
 ## Features
 
