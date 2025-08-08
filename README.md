@@ -1,4 +1,4 @@
-# WhiteThing
+# White Thing
 
 A minimal RTF text editor for macOS with customizable appearance and hover-activated controls.
 
