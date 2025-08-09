@@ -33,7 +33,7 @@ struct MenuBarView: View {
     var body: some View {
         
         VStack(alignment: .leading) {
-            
+                
             if document.hasDocument {
                 
                 // Folder selector
@@ -69,7 +69,23 @@ struct MenuBarView: View {
                         }
                     }
                     .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    
+                    Divider().frame(height: 12)
+                        .padding(8)
+                    
+                    Button(document.isMaximized ? "Make it littler" : "Make it big instead") {
+                        document.toggleMaximize()
+                        if document.isMaximized {
+                            document.updatePadding(350)
+                        } else {
+                            document.updatePadding(100)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .help("Resize Window")
                 }
+                
                 
                 
             }
@@ -158,17 +174,6 @@ struct MenuBarView: View {
                 .tint(Color(document.textColor))
                 
                 Spacer()
-                
-                Button(document.isMaximized ? "Little" : "Big") {
-                    document.toggleMaximize()
-                    if document.isMaximized {
-                        document.updatePadding(350)
-                    } else {
-                        document.updatePadding(100)
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Resize Window")
                 
             }
             .font(.system(size: 12, design: .monospaced))

@@ -24,6 +24,7 @@ struct ContentView: View {
             
             if document.hasDocument {
                 EditorView(document: document)
+                    .padding(.bottom)
                     .background(Color(document.backgroundColor))
                     .onAppear {
                         document.loadLastDocument()
@@ -33,7 +34,7 @@ struct ContentView: View {
                 HStack{
                     Spacer()
                     Text("Click on Open or New which are buttons")
-                        .foregroundColor(.gray)
+                        .foregroundColor(document.textColor.opacity(0.5))
                     Spacer()
                 }
                 Spacer()
@@ -58,7 +59,7 @@ struct ContentView: View {
     }
     
     private func checkMenuVisibility(location: CGPoint) {
-        if location.y < 80 {
+        if location.y < 20 {
             showMenu = true
         } else if showMenu {
             hideMenu()

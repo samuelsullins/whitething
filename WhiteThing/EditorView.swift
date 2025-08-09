@@ -64,62 +64,89 @@ struct EditorView: NSViewRepresentable {
         // ALWAYS apply colors and fonts after any document loading
         let newTextColor = NSColor(document.textColor)
         let newBackgroundColor = NSColor(document.backgroundColor)
-        let newFont = document.font
+        let baseFont = document.font
         
-        print("Applying font to all text: \(newFont)")
+        print("Applying font to all text: \(baseFont)")
         
         // Update text view colors
         textView.backgroundColor = newBackgroundColor
         textView.textColor = newTextColor
         scrollView.backgroundColor = newBackgroundColor
-//        
-//        // Update window background color to match document background
-//        // This helps prevent the "strange background" issue
-//        DispatchQueue.main.async {
-//            if let window = textView.window {
-//                if self.document.isFullscreen {
-//                    window.backgroundColor = newBackgroundColor
-//                } else {
-//                    // For windowed mode, keep it clear for transparency effects
-//                    window.backgroundColor = NSColor.clear
-//                }
-//            }
-//        }
+
+        // PRESERVE current font traits (bold/italic) when updating typing attributes
+        var typingFont = baseFont
+        
+        // Check if current typing attributes have bold or italic traits
+        if let currentFont = textView.typingAttributes[.font] as? NSFont {
+            let currentTraits = currentFont.fontDescriptor.symbolicTraits
+            
+            if currentTraits.contains(.bold) {
+                typingFont = NSFontManager.shared.convert(typingFont, toHaveTrait: .boldFontMask)
+            }
+            if currentTraits.contains(.italic) {
+                typingFont = NSFontManager.shared.convert(typingFont, toHaveTrait: .italicFontMask)
+            }
+        }
 
         // Set up default text attributes for new text
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.firstLineHeadIndent = 20
+        paragraphStyle.alignment = .justified
 
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: newFont,
+            .font: typingFont,  // Use the font with preserved traits
             .foregroundColor: newTextColor,
             .paragraphStyle: paragraphStyle
         ]
 
         textView.typingAttributes = attributes
         
-        // Apply viewer settings to ALL existing text (this is the key part!)
+        // Apply viewer settings to ALL existing text BUT PRESERVE bold/italic traits
         if let textStorage = textView.textStorage, textStorage.length > 0 {
             let fullRange = NSRange(location: 0, length: textStorage.length)
             
-            print("Applying font \(newFont) to range: \(fullRange)")
+            print("Applying colors and updating fonts while preserving formatting")
             
             // Begin editing to batch changes
             textStorage.beginEditing()
             
-            // Remove old attributes that might conflict with viewer settings
+            // Update colors and paragraph style for all text
             textStorage.removeAttribute(.foregroundColor, range: fullRange)
             textStorage.removeAttribute(.backgroundColor, range: fullRange)
-            textStorage.removeAttribute(.font, range: fullRange)
+            textStorage.removeAttribute(.paragraphStyle, range: fullRange)
             
-            // Apply ALL viewer settings to existing text
+            let justifiedParagraphStyle = NSMutableParagraphStyle()
+            justifiedParagraphStyle.firstLineHeadIndent = 20
+            justifiedParagraphStyle.alignment = .justified
+            
             textStorage.addAttribute(.foregroundColor, value: newTextColor, range: fullRange)
-            textStorage.addAttribute(.font, value: newFont, range: fullRange)
+            textStorage.addAttribute(.paragraphStyle, value: justifiedParagraphStyle, range: fullRange)
+            
+            // Update fonts while preserving bold/italic traits
+            textStorage.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+                if let currentFont = value as? NSFont {
+                    let currentTraits = currentFont.fontDescriptor.symbolicTraits
+                    var newFont = baseFont
+                    
+                    // Preserve bold and italic traits
+                    if currentTraits.contains(.bold) {
+                        newFont = NSFontManager.shared.convert(newFont, toHaveTrait: .boldFontMask)
+                    }
+                    if currentTraits.contains(.italic) {
+                        newFont = NSFontManager.shared.convert(newFont, toHaveTrait: .italicFontMask)
+                    }
+                    
+                    textStorage.addAttribute(.font, value: newFont, range: range)
+                } else {
+                    // No existing font, use base font
+                    textStorage.addAttribute(.font, value: baseFont, range: range)
+                }
+            }
             
             // End editing to commit changes
             textStorage.endEditing()
             
-            print("Font application completed")
+            print("Font application completed with preserved formatting")
         }
         
         // Force visual update
@@ -147,10 +174,7 @@ struct EditorView: NSViewRepresentable {
     }
 }
 
-// CustomTextView class remains the same
 class CustomTextView: NSTextView {
-    private var isBoldActive = false
-    private var isItalicActive = false
     
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "b" {
@@ -165,50 +189,131 @@ class CustomTextView: NSTextView {
     }
     
     private func toggleBold() {
-        isBoldActive.toggle()
-        applyToggleAttributes()
+        let range = selectedRange()
+        
+        if range.length > 0 {
+            // Text is selected - toggle bold for selection
+            toggleBoldForRange(range)
+        } else {
+            // No selection - toggle bold for typing attributes
+            toggleBoldForTyping()
+        }
     }
     
     private func toggleItalic() {
-        isItalicActive.toggle()
-        applyToggleAttributes()
+        let range = selectedRange()
+        
+        if range.length > 0 {
+            // Text is selected - toggle italic for selection
+            toggleItalicForRange(range)
+        } else {
+            // No selection - toggle italic for typing attributes
+            toggleItalicForTyping()
+        }
     }
     
-    private func applyToggleAttributes() {
-        if let currentFont = typingAttributes[.font] as? NSFont {
-            let bolded = isBoldActive ? addBoldTrait(to: currentFont) : removeBoldTrait(from: currentFont)
-            let italicized = isItalicActive ? addItalicTrait(to: bolded) : removeItalicTrait(from: bolded)
-            typingAttributes[.font] = italicized
+    private func toggleBoldForRange(_ range: NSRange) {
+        guard let textStorage = textStorage else { return }
+        
+        textStorage.beginEditing()
+        
+        textStorage.enumerateAttribute(.font, in: range) { value, subRange, _ in
+            if let font = value as? NSFont {
+                let traits = font.fontDescriptor.symbolicTraits
+                let newFont: NSFont
+                
+                if traits.contains(.bold) {
+                    newFont = NSFontManager.shared.convert(font, toNotHaveTrait: .boldFontMask)
+                } else {
+                    newFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+                }
+                
+                textStorage.addAttribute(.font, value: newFont, range: subRange)
+            }
         }
         
-        // Also apply to selection if text is selected
-        let range = selectedRange()
-        if range.length > 0 {
-            textStorage?.enumerateAttribute(.font, in: range) { value, subRange, _ in
-                if let font = value as? NSFont {
-                    let bolded = isBoldActive ? self.addBoldTrait(to: font) : self.removeBoldTrait(from: font)
-                    let italicized = self.isItalicActive ? self.addItalicTrait(to: bolded) : self.removeItalicTrait(from: bolded)
-                    textStorage?.addAttribute(.font, value: italicized, range: subRange)
+        textStorage.endEditing()
+        
+        // Also update typing attributes based on the font at cursor position
+        updateTypingAttributesAtCursor()
+    }
+    
+    private func toggleItalicForRange(_ range: NSRange) {
+        guard let textStorage = textStorage else { return }
+        
+        textStorage.beginEditing()
+        
+        textStorage.enumerateAttribute(.font, in: range) { value, subRange, _ in
+            if let font = value as? NSFont {
+                let traits = font.fontDescriptor.symbolicTraits
+                let newFont: NSFont
+                
+                if traits.contains(.italic) {
+                    newFont = NSFontManager.shared.convert(font, toNotHaveTrait: .italicFontMask)
+                } else {
+                    newFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
                 }
+                
+                textStorage.addAttribute(.font, value: newFont, range: subRange)
+            }
+        }
+        
+        textStorage.endEditing()
+        
+        // Also update typing attributes based on the font at cursor position
+        updateTypingAttributesAtCursor()
+    }
+    
+    private func toggleBoldForTyping() {
+        guard let currentFont = typingAttributes[.font] as? NSFont else { return }
+        
+        let traits = currentFont.fontDescriptor.symbolicTraits
+        let newFont: NSFont
+        
+        if traits.contains(.bold) {
+            newFont = NSFontManager.shared.convert(currentFont, toNotHaveTrait: .boldFontMask)
+        } else {
+            newFont = NSFontManager.shared.convert(currentFont, toHaveTrait: .boldFontMask)
+        }
+        
+        typingAttributes[.font] = newFont
+        print("Bold toggled for typing: \(traits.contains(.bold) ? "OFF" : "ON")")
+    }
+    
+    private func toggleItalicForTyping() {
+        guard let currentFont = typingAttributes[.font] as? NSFont else { return }
+        
+        let traits = currentFont.fontDescriptor.symbolicTraits
+        let newFont: NSFont
+        
+        if traits.contains(.italic) {
+            newFont = NSFontManager.shared.convert(currentFont, toNotHaveTrait: .italicFontMask)
+        } else {
+            newFont = NSFontManager.shared.convert(currentFont, toHaveTrait: .italicFontMask)
+        }
+        
+        typingAttributes[.font] = newFont
+        print("Italic toggled for typing: \(traits.contains(.italic) ? "OFF" : "ON")")
+    }
+    
+    private func updateTypingAttributesAtCursor() {
+        let cursorPosition = selectedRange().location
+        
+        if cursorPosition > 0 && cursorPosition <= textStorage?.length ?? 0 {
+            // Get the font at the cursor position
+            if let fontAtCursor = textStorage?.attribute(.font, at: cursorPosition - 1, effectiveRange: nil) as? NSFont {
+                typingAttributes[.font] = fontAtCursor
             }
         }
     }
     
-    override func insertText(_ insertString: Any, replacementRange: NSRange) {
-        applyToggleAttributes()
-        super.insertText(insertString, replacementRange: replacementRange)
-    }
-    
-    private func addBoldTrait(to font: NSFont) -> NSFont {
-        NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-    }
-    private func removeBoldTrait(from font: NSFont) -> NSFont {
-        NSFontManager.shared.convert(font, toNotHaveTrait: .boldFontMask)
-    }
-    private func addItalicTrait(to font: NSFont) -> NSFont {
-        NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-    }
-    private func removeItalicTrait(from font: NSFont) -> NSFont {
-        NSFontManager.shared.convert(font, toNotHaveTrait: .italicFontMask)
+    // Override to maintain formatting when moving cursor
+    override func setSelectedRange(_ charRange: NSRange) {
+        super.setSelectedRange(charRange)
+        
+        // When cursor moves, update typing attributes to match the character before cursor
+        if charRange.length == 0 && charRange.location > 0 {
+            updateTypingAttributesAtCursor()
+        }
     }
 }

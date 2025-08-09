@@ -90,20 +90,95 @@ class DocumentManager: NSObject, ObservableObject {
         }
     }
     
+    func saveDocument() {
+        guard let folder = folderURL else {
+            print("No folder selected")
+            return
+        }
+        
+        // Create file URL if needed
+        if fileURL == nil {
+            if filename == "no file" || filename.isEmpty {
+                filename = "untitled"
+            }
+            fileURL = folder.appendingPathComponent("\(filename).rtf")
+        }
+        
+        guard let url = fileURL else { return }
+        
+        do {
+            if let textView = textView {
+                let mutableCopy = NSMutableAttributedString(attributedString: textView.attributedString())
+                let fullRange = NSRange(location: 0, length: mutableCopy.length)
+                
+                // Remove viewer-specific attributes but PRESERVE bold/italic traits
+                mutableCopy.removeAttribute(.foregroundColor, range: fullRange)
+                mutableCopy.removeAttribute(.backgroundColor, range: fullRange)
+                
+                // Update fonts to preserve bold/italic but remove viewer-specific font settings
+                mutableCopy.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+                    if let currentFont = value as? NSFont {
+                        let traits = currentFont.fontDescriptor.symbolicTraits
+                        
+                        // Use a standard font but preserve bold/italic traits
+                        var baseFont = NSFont(name: "Times New Roman", size: 12)!
+                        
+                        if traits.contains(.bold) {
+                            baseFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .boldFontMask)
+                        }
+                        if traits.contains(.italic) {
+                            baseFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
+                        }
+                        
+                        mutableCopy.addAttribute(.font, value: baseFont, range: range)
+                    }
+                }
+
+                if let data = mutableCopy.rtf(from: fullRange, documentAttributes: [:]) {
+                    try data.write(to: url)
+                    print("Saved to: \(url.path) with preserved bold/italic formatting")
+                }
+            }
+        } catch {
+            print("Error saving document: \(error)")
+        }
+    }
+
+    // Replace the loadDocument method in DocumentManager.swift
     func loadDocument(from url: URL) {
         do {
             let data = try Data(contentsOf: url)
             if let attrString = NSAttributedString(rtf: data, documentAttributes: nil) {
-                // Remove any saved formatting so viewer preferences take precedence
                 let mutableCopy = NSMutableAttributedString(attributedString: attrString)
                 let fullRange = NSRange(location: 0, length: mutableCopy.length)
                 
-                // Strip out all formatting from the document
+                // Remove viewer-specific formatting but PRESERVE bold/italic traits
                 mutableCopy.removeAttribute(.foregroundColor, range: fullRange)
                 mutableCopy.removeAttribute(.backgroundColor, range: fullRange)
-                mutableCopy.removeAttribute(.font, range: fullRange)
+                
+                // Update fonts to match viewer settings while preserving bold/italic
+                mutableCopy.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+                    if let currentFont = value as? NSFont {
+                        let traits = currentFont.fontDescriptor.symbolicTraits
+                        
+                        // Apply viewer's font settings but preserve bold/italic traits
+                        var viewerFont = self.font // Use the viewer's current font
+                        
+                        if traits.contains(.bold) {
+                            viewerFont = NSFontManager.shared.convert(viewerFont, toHaveTrait: .boldFontMask)
+                        }
+                        if traits.contains(.italic) {
+                            viewerFont = NSFontManager.shared.convert(viewerFont, toHaveTrait: .italicFontMask)
+                        }
+                        
+                        mutableCopy.addAttribute(.font, value: viewerFont, range: range)
+                    } else {
+                        // No existing font, use viewer's base font
+                        mutableCopy.addAttribute(.font, value: self.font, range: range)
+                    }
+                }
 
-                // Set the cleaned content to be loaded into the editor
+                // Set the content with preserved bold/italic formatting
                 attributedContent = mutableCopy
                 needsLoad = true
                 fileURL = url
@@ -112,6 +187,7 @@ class DocumentManager: NSObject, ObservableObject {
                 folderName = folderURL?.lastPathComponent ?? "Unknown"
                 hasDocument = true
                 UserDefaults.standard.set(url.absoluteString, forKey: "lastFilePath")
+                print("Loaded document with preserved bold/italic formatting")
             }
         } catch {
             print("Error loading document: \(error)")
@@ -151,39 +227,6 @@ class DocumentManager: NSObject, ObservableObject {
         
         if panel.runModal() == .OK, let url = panel.url {
             loadDocument(from: url)
-        }
-    }
-    
-    func saveDocument() {
-        guard let folder = folderURL else {
-            print("No folder selected")
-            return
-        }
-        
-        // Create file URL if needed
-        if fileURL == nil {
-            if filename == "no file" || filename.isEmpty {
-                filename = "untitled"
-            }
-            fileURL = folder.appendingPathComponent("\(filename).rtf")
-        }
-        
-        guard let url = fileURL else { return }
-        
-        do {
-            if let textView = textView {
-                let mutableCopy = NSMutableAttributedString(attributedString: textView.attributedString())
-                // Remove viewer colors before saving
-                mutableCopy.removeAttribute(.foregroundColor, range: NSRange(location: 0, length: mutableCopy.length))
-                mutableCopy.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: mutableCopy.length))
-
-                if let data = mutableCopy.rtf(from: NSRange(location: 0, length: mutableCopy.length), documentAttributes: [:]) {
-                    try data.write(to: url)
-                    print("Saved to: \(url.path)")
-                }
-            }
-        } catch {
-            print("Error saving document: \(error)")
         }
     }
     
