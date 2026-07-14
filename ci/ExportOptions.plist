@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Distribute outside the App Store, signed with a Developer ID cert. -->
+	<key>method</key>
+	<string>developer-id</string>
+
+	<key>teamID</key>
+	<string>MJ9R3XRRGM</string>
+
+	<!-- CI imports exactly one Developer ID Application identity, so sign manually
+	     rather than letting Xcode try to talk to your (absent) Apple account. -->
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
+
+	<!-- We notarize explicitly with notarytool in a later workflow step,
+	     so don't ask the export step to do it. -->
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+</dict>
+</plist>
