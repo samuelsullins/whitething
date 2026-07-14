@@ -3,63 +3,124 @@ import AppKit
 import UniformTypeIdentifiers
 
 class DocumentManager: NSObject, ObservableObject {
-    @Published var filename = "new_file"
-    @Published var folderName = "Select Folder"
-    @Published var fontSize: Double = 14
+    @Published var filename = "untitled"
+    @Published var folderName = "Desktop"
+    @Published var fontSize: Double = 24
     @Published var horizontalPadding: Double = 100
+    @Published var textAreaWidth: Double = 800   // width of the centered text column (pts)
     @Published var textColor = Color.black
     @Published var backgroundColor = Color.white
-    @Published var fontName = "Helvetica"
-    
-    // Flag to prevent saving during initial load
-    private var isLoading = false
+    @Published var fontName = "Palatino"
+    @Published var isDarkMode = false
+
+    // Bumped whenever an appearance setting changes so the editor knows to
+    // re-apply attributes across the whole document (instead of on every keystroke).
+    @Published var settingsVersion = 0
     @Published var attributedContent = NSAttributedString()
     @Published var needsLoad = false
     @Published var hasDocument = false
     @Published var isMaximized = false
-    
+
+    // The two bundled typefaces the font toggle switches between.
+    private let monoFontName = "Courier"
+    private let serifFontName = "Palatino"
+
     var font: NSFont {
         NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
     }
-    
+
+    var isMono: Bool { fontName == monoFontName }
+
+    var wordCount: Int {
+        attributedContent.string.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
     private var folderURL: URL?
-    private var folderBookmark: Data?
     private var fileURL: URL?
     private var saveTimer: Timer?
     weak var textView: NSTextView?
-    
+
+    // Desktop is the default home for new documents when the user hasn't
+    // picked a folder yet.
+    private var defaultFolder: URL? {
+        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+    }
+
     override init() {
         super.init()
-        print("DocumentManager initializing...")
         // Load settings immediately when DocumentManager is created
         loadSettings()
-        print("DocumentManager initialized with settings loaded")
+
+        // Flush any pending edits to disk before the app or window goes away.
+        NotificationCenter.default.addObserver(self, selector: #selector(flushSave),
+                                               name: NSApplication.willTerminateNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(flushSave),
+                                               name: NSWindow.willCloseNotification, object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func flushSave() {
+        saveTimer?.invalidate()
+        saveDocument()
     }
     
     // Explicit save methods that can be called when user changes settings
     func updateFontSize(_ newSize: Double) {
         fontSize = newSize
+        settingsVersion += 1
         saveSettings()
     }
-    
+
     func updatePadding(_ newPadding: Double) {
         horizontalPadding = newPadding
+        settingsVersion += 1
         saveSettings()
     }
-    
+
+    func updateTextAreaWidth(_ newWidth: Double) {
+        textAreaWidth = newWidth
+        settingsVersion += 1
+        saveSettings()
+    }
+
     func updateFontName(_ newName: String) {
         fontName = newName
+        settingsVersion += 1
         saveSettings()
     }
-    
-    func updateTextColor(_ newColor: Color) {
-        textColor = newColor
+
+    // Toggle between the bundled mono (Courier) and serif (Palatino) faces.
+    func toggleFont() {
+        updateFontName(isMono ? serifFontName : monoFontName)
+    }
+
+    func toggleDarkMode() {
+        isDarkMode.toggle()
+        applyColorScheme()
+        settingsVersion += 1
         saveSettings()
     }
-    
-    func updateBackgroundColor(_ newColor: Color) {
-        backgroundColor = newColor
-        saveSettings()
+
+    // Derives the editor's text/background colors from the current mode.
+    // Custom palettes can be swapped in here later.
+    func applyColorScheme() {
+        if isDarkMode {
+            // #0b1e1b background, #66ab93 text
+            backgroundColor = Color(.sRGB, red: 0x0b / 255, green: 0x1e / 255, blue: 0x1b / 255)
+            textColor = Color(.sRGB, red: 0x66 / 255, green: 0xab / 255, blue: 0x94 / 255)
+        } else {
+            backgroundColor = .white
+            textColor = .black
+        }
+    }
+
+    func copyAll() {
+        let text = textView?.string ?? attributedContent.string
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
     
     // MARK: - Window Controls
@@ -91,14 +152,19 @@ class DocumentManager: NSObject, ObservableObject {
     }
     
     func saveDocument() {
-        guard let folder = folderURL else {
-            print("No folder selected")
+        // Fall back to Desktop rather than silently dropping the user's work.
+        guard let folder = folderURL ?? defaultFolder else {
+            print("No folder available to save into")
             return
         }
-        
+        if folderURL == nil {
+            folderURL = folder
+            folderName = folder.lastPathComponent
+        }
+
         // Create file URL if needed
         if fileURL == nil {
-            if filename == "no file" || filename.isEmpty {
+            if filename.isEmpty {
                 filename = "untitled"
             }
             fileURL = folder.appendingPathComponent("\(filename).rtf")
@@ -121,7 +187,7 @@ class DocumentManager: NSObject, ObservableObject {
                         let traits = currentFont.fontDescriptor.symbolicTraits
                         
                         // Use a standard font but preserve bold/italic traits
-                        var baseFont = NSFont(name: "Times New Roman", size: 12)!
+                        var baseFont = NSFont(name: "Times New Roman", size: 12) ?? NSFont.systemFont(ofSize: 12)
                         
                         if traits.contains(.bold) {
                             baseFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .boldFontMask)
@@ -210,8 +276,13 @@ class DocumentManager: NSObject, ObservableObject {
         
         // Clear the last file preference
         UserDefaults.standard.removeObject(forKey: "lastFilePath")
-        
-        // If we have a folder selected, create the file there
+
+        // Ensure a destination folder exists (default to Desktop) so the new
+        // document is actually written and autosaves have somewhere to go.
+        if folderURL == nil {
+            folderURL = defaultFolder
+            folderName = folderURL?.lastPathComponent ?? "Desktop"
+        }
         if let folder = folderURL {
             createNewFile(in: folder)
         }
@@ -246,15 +317,9 @@ class DocumentManager: NSObject, ObservableObject {
         panel.prompt = "Move Here"
         
         if panel.runModal() == .OK, let url = panel.url {
-            // Save bookmark for future app launches
-            do {
-                let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                UserDefaults.standard.set(bookmark, forKey: "folderBookmark")
-                folderBookmark = bookmark
-            } catch {
-                print("Failed to create bookmark: \(error)")
-            }
-            
+            // Remember the folder for future launches.
+            UserDefaults.standard.set(url.absoluteString, forKey: "folderPath")
+
             // Move existing file if we have one
             if let currentFile = fileURL {
                 let newFileURL = url.appendingPathComponent(currentFile.lastPathComponent)
@@ -288,7 +353,7 @@ class DocumentManager: NSObject, ObservableObject {
     }
     
     func createNewFile(in folder: URL) {
-        if filename == "no file" || filename.isEmpty {
+        if filename.isEmpty {
             filename = "untitled"
         }
         
@@ -345,142 +410,49 @@ class DocumentManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Font Picker
-    func showFontPicker() {
-        let fontManager = NSFontManager.shared
-        fontManager.target = self
-        fontManager.setSelectedFont(font, isMultiple: false)
-        fontManager.orderFrontFontPanel(nil)
-    }
-    
-    @objc func changeFont(_ sender: Any?) {
-        guard let fontManager = sender as? NSFontManager else { return }
-        let newFont = fontManager.convert(font)
-        updateFontName(newFont.fontName)
-        updateFontSize(Double(newFont.pointSize))
-    }
-    
     // MARK: - Settings
     func saveSettings() {
-        print("=== SAVING SETTINGS ===")
         let defaults = UserDefaults.standard
-        
+
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(horizontalPadding, forKey: "padding")
+        defaults.set(textAreaWidth, forKey: "textAreaWidth")
         defaults.set(fontName, forKey: "fontName")
-        
-        print("Saved: fontSize=\(fontSize), padding=\(horizontalPadding), fontName=\(fontName)")
-        
-        // Save colors
-        do {
-            let textColorData = try NSKeyedArchiver.archivedData(withRootObject: NSColor(textColor), requiringSecureCoding: false)
-            defaults.set(textColorData, forKey: "textColor")
-            print("Saved text color successfully")
-        } catch {
-            print("Failed to save text color: \(error)")
-        }
-        
-        do {
-            let bgColorData = try NSKeyedArchiver.archivedData(withRootObject: NSColor(backgroundColor), requiringSecureCoding: false)
-            defaults.set(bgColorData, forKey: "backgroundColor")
-            print("Saved background color successfully")
-        } catch {
-            print("Failed to save background color: \(error)")
-        }
-        
-        // Force synchronize to disk
-        let success = defaults.synchronize()
-        print("UserDefaults synchronize result: \(success)")
-        print("=== SETTINGS SAVED ===")
+        defaults.set(isDarkMode, forKey: "isDarkMode")
     }
 
     func loadSettings() {
-        print("=== LOADING SETTINGS ===")
-        isLoading = true  // Prevent saves during loading
-        
         let defaults = UserDefaults.standard
-        
+
         // Load numeric values
         let savedFontSize = defaults.double(forKey: "fontSize")
-        if savedFontSize > 0 {
-            fontSize = savedFontSize
-            print("Loaded fontSize: \(fontSize)")
-        } else {
-            fontSize = 14
-            print("Using default fontSize: 14")
-        }
-        
-        let savedPadding = defaults.double(forKey: "padding")
-        if savedPadding >= 0 {
-            horizontalPadding = savedPadding
-            print("Loaded horizontalPadding: \(horizontalPadding)")
+        fontSize = savedFontSize > 0 ? savedFontSize : 24
+
+        if defaults.object(forKey: "padding") != nil {
+            horizontalPadding = defaults.double(forKey: "padding")
         } else {
             horizontalPadding = 100
-            print("Using default horizontalPadding: 100")
         }
-        
+
+        let savedWidth = defaults.double(forKey: "textAreaWidth")
+        textAreaWidth = savedWidth > 0 ? min(max(savedWidth, 500), 1500) : 800
+
         // Load font name
-        if let savedFontName = defaults.string(forKey: "fontName") {
-            fontName = savedFontName
-            print("Loaded fontName: \(fontName)")
+        fontName = defaults.string(forKey: "fontName") ?? serifFontName
+
+        // Load appearance mode and derive colors from it
+        isDarkMode = defaults.bool(forKey: "isDarkMode")
+        applyColorScheme()
+
+        // Restore the saved folder if it still exists, otherwise default to Desktop.
+        if let path = defaults.string(forKey: "folderPath"),
+           let url = URL(string: path),
+           FileManager.default.fileExists(atPath: url.path) {
+            folderURL = url
+            folderName = url.lastPathComponent
         } else {
-            fontName = "Helvetica"
-            print("Using default fontName: Helvetica")
+            folderURL = defaultFolder
+            folderName = folderURL?.lastPathComponent ?? "Desktop"
         }
-        
-        // Load colors
-        if let colorData = defaults.data(forKey: "textColor") {
-            do {
-                if let color = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: colorData) {
-                    textColor = Color(color)
-                    print("Loaded textColor successfully")
-                } else {
-                    textColor = Color.black
-                    print("Failed to unarchive textColor, using default")
-                }
-            } catch {
-                textColor = Color.black
-                print("Error loading textColor: \(error)")
-            }
-        } else {
-            textColor = Color.black
-            print("No saved textColor found, using default")
-        }
-        
-        if let colorData = defaults.data(forKey: "backgroundColor") {
-            do {
-                if let color = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: colorData) {
-                    backgroundColor = Color(color)
-                    print("Loaded backgroundColor successfully")
-                } else {
-                    backgroundColor = Color.white
-                    print("Failed to unarchive backgroundColor, using default")
-                }
-            } catch {
-                backgroundColor = Color.white
-                print("Error loading backgroundColor: \(error)")
-            }
-        } else {
-            backgroundColor = Color.white
-            print("No saved backgroundColor found, using default")
-        }
-        
-        // Load saved folder URL if exists
-        if let folderBookmark = defaults.data(forKey: "folderBookmark") {
-            var isStale = false
-            do {
-                let url = try URL(resolvingBookmarkData: folderBookmark, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
-                if url.startAccessingSecurityScopedResource() {
-                    folderURL = url
-                    folderName = url.lastPathComponent
-                    print("Loaded folder: \(folderName)")
-                }
-            } catch {
-                print("Error loading folder bookmark: \(error)")
-            }
-        }
-        
-        isLoading = false  // Re-enable saves
-        print("=== SETTINGS LOADED ===")
     }
 }

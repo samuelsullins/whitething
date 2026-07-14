@@ -2,9 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+	  Sandbox is intentionally disabled so the app can read/write the user's
+	  real Desktop (and any folder) without a security-scoped picker every
+	  launch. This app is distributed by copying into /Applications, not via
+	  the Mac App Store. To re-enable sandboxing, set app-sandbox back to true
+	  and add com.apple.security.files.user-selected.read-write.
+	-->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-write</key>
-	<true/>
+	<false/>
 </dict>
 </plist>

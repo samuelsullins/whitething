@@ -15,34 +15,34 @@ struct ContentView: View {
     @State private var mouseLocation: CGPoint = .zero
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Hover menu
-            if showMenu || !document.hasDocument {
-                MenuBarView(document: document)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            
+        ZStack(alignment: .top) {
+            // Content
             if document.hasDocument {
                 EditorView(document: document)
-                    .padding(.bottom)
                     .background(Color(document.backgroundColor))
-                    .onAppear {
-                        document.loadLastDocument()
-                    }
             } else {
-                Spacer()
-                HStack{
+                HStack {
                     Spacer()
                     Text("Click on Open or New which are buttons")
                         .foregroundColor(document.textColor.opacity(0.5))
                     Spacer()
                 }
-                Spacer()
+                .frame(maxHeight: .infinity)
             }
-            
+
+            // Slim hover menu that floats in the title-bar strip at the top.
+            if showMenu || !document.hasDocument {
+                MenuBarView(document: document)
+                    .transition(.opacity)
+            }
         }
         .background(document.backgroundColor)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Extend content into the title-bar strip so the menu sits at the very
+        // top of the window, inline with the traffic lights, and reach the
+        // bottom edge too.
+        .ignoresSafeArea(.container, edges: [.top, .bottom])
+        .background(WindowConfigurator())
         .animation(.easeInOut(duration: 0.2), value: showMenu)
         .onContinuousHover { phase in
             if document.hasDocument {
@@ -51,28 +51,47 @@ struct ContentView: View {
                     mouseLocation = location
                     checkMenuVisibility(location: location)
                 case .ended:
-                    hideMenu()
+                    showMenu = false
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(document.isDarkMode ? .dark : .light)
+        .onAppear {
+            // Reopen the last document on launch (must live on a view that is
+            // always present, not on the editor which only exists once a
+            // document is loaded).
+            document.loadLastDocument()
+        }
     }
-    
+
+    // Height of the top menu strip; the menu is only shown while the cursor is
+    // actually over it (no larger "near" trigger zone).
+    private let menuBarHeight: CGFloat = 30
+
     private func checkMenuVisibility(location: CGPoint) {
-        if location.y < 20 {
-            showMenu = true
-        } else if showMenu {
-            hideMenu()
-        }
-    }
-    
-    private func hideMenu() {
-        if mouseLocation.y > 80 {
-            showMenu = false
-        }
+        showMenu = location.y < menuBarHeight
     }
 }
 
 #Preview {
     ContentView()
+}
+
+/// Reaches the hosting NSWindow to make the content view fill the entire
+/// window (including the title-bar strip) so our top menu aligns with the
+/// traffic-light controls.
+struct WindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.styleMask.insert(.fullSizeContentView)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.isMovableByWindowBackground = true
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

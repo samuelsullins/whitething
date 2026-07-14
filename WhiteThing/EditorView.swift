@@ -36,30 +36,42 @@ struct EditorView: NSViewRepresentable {
         scrollView.backgroundColor = NSColor(document.backgroundColor)
         scrollView.drawsBackground = true
         
+        // Custom gliding caret, colored to match the text.
+        textView.caretColor = NSColor(document.textColor)
+        textView.insertionPointColor = NSColor(document.textColor)
+        textView.setupCaret()
+
         context.coordinator.textView = textView
         document.textView = textView
-        
+
         return scrollView
     }
-    
+
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
-        
-        print("EditorView updateNSView - Font: \(document.fontName) \(document.fontSize)pt")
-        
-        // Update padding
-        textView.textContainerInset = NSSize(width: document.horizontalPadding, height: 20)
+        guard let textView = scrollView.documentView as? CustomTextView else { return }
+
+        // Keep the centered text column width in sync (cheap; the text view
+        // recomputes its side insets in layout()).
+        textView.textColumnWidth = CGFloat(document.textAreaWidth)
 
         // Handle document loading FIRST, before applying colors
+        var didLoad = false
         if document.needsLoad {
-            print("Loading document content...")
             textView.textStorage?.setAttributedString(document.attributedContent)
-            
+            didLoad = true
+
             // Set needsLoad to false asynchronously to avoid SwiftUI warning
             DispatchQueue.main.async {
                 self.document.needsLoad = false
             }
         }
+
+        // Re-applying colors/fonts to the whole document is O(n), so only do it
+        // when a document was just loaded or an appearance setting actually
+        // changed — NOT on every keystroke (updateNSView runs on each edit).
+        let appearanceChanged = context.coordinator.lastSettingsVersion != document.settingsVersion
+        guard didLoad || appearanceChanged else { return }
+        context.coordinator.lastSettingsVersion = document.settingsVersion
 
         // ALWAYS apply colors and fonts after any document loading
         let newTextColor = NSColor(document.textColor)
@@ -71,6 +83,8 @@ struct EditorView: NSViewRepresentable {
         // Update text view colors
         textView.backgroundColor = newBackgroundColor
         textView.textColor = newTextColor
+        textView.caretColor = newTextColor
+        textView.insertionPointColor = newTextColor
         scrollView.backgroundColor = newBackgroundColor
 
         // PRESERVE current font traits (bold/italic) when updating typing attributes
@@ -152,6 +166,10 @@ struct EditorView: NSViewRepresentable {
         // Force visual update
         textView.needsDisplay = true
         scrollView.needsDisplay = true
+
+        // Font/size/padding/color may have moved the caret; reposition it
+        // without animating (this isn't a typing move).
+        textView.refreshCaret(animated: false)
     }
     
     func makeCoordinator() -> Coordinator {
@@ -161,7 +179,10 @@ struct EditorView: NSViewRepresentable {
     class Coordinator: NSObject, NSTextViewDelegate {
         let document: DocumentManager
         weak var textView: NSTextView?
-        
+        // Last appearance version applied to the full document; -1 forces the
+        // first pass to apply.
+        var lastSettingsVersion = -1
+
         init(document: DocumentManager) {
             self.document = document
         }
@@ -175,7 +196,201 @@ struct EditorView: NSViewRepresentable {
 }
 
 class CustomTextView: NSTextView {
-    
+
+    // MARK: - Centered text column
+
+    /// Desired width of the text column. The view centers it and grows the
+    /// side insets to fill the rest of the window.
+    var textColumnWidth: CGFloat = 700 {
+        didSet {
+            guard textColumnWidth != oldValue else { return }
+            needsLayout = true
+        }
+    }
+    private let minSideInset: CGFloat = 24
+    private let topInset: CGFloat = 20
+
+    override func layout() {
+        let side = max(minSideInset, (bounds.width - textColumnWidth) / 2)
+        if abs(textContainerInset.width - side) > 0.5 {
+            textContainerInset = NSSize(width: side, height: topInset)
+        }
+        super.layout()
+        refreshCaret(animated: false)
+    }
+
+    // MARK: - Gliding caret
+
+    private let caretLayer = CALayer()
+    private let caretWidth: CGFloat = 2
+    private var blinkIdleTimer: Timer?
+    private var caretReady = false
+
+    var caretColor: NSColor = .black {
+        didSet { caretLayer.backgroundColor = caretColor.cgColor }
+    }
+
+    /// Builds the custom caret. Called once from EditorView.makeNSView.
+    func setupCaret() {
+        guard !caretReady else { return }
+        caretReady = true
+
+        wantsLayer = true
+        caretLayer.backgroundColor = caretColor.cgColor
+        caretLayer.cornerRadius = 1
+        caretLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        // The layer position/size are driven manually; suppress implicit
+        // animations except the ones we add explicitly.
+        caretLayer.actions = ["position": NSNull(), "bounds": NSNull(), "hidden": NSNull(), "opacity": NSNull()]
+        caretLayer.contentsScale = window?.backingScaleFactor ?? 2
+        layer?.addSublayer(caretLayer)
+
+        // Re-show/hide the caret as this view or its window gains/loses focus.
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(focusChanged),
+                       name: NSWindow.didBecomeKeyNotification, object: nil)
+        nc.addObserver(self, selector: #selector(focusChanged),
+                       name: NSWindow.didResignKeyNotification, object: nil)
+
+        updateCaret(animated: false)
+    }
+
+    func refreshCaret(animated: Bool) { updateCaret(animated: animated) }
+
+    @objc private func focusChanged() { updateCaret(animated: false) }
+
+    /// Suppress the native (jump-cut) caret; ours replaces it.
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) { }
+
+    private func updateCaret(animated: Bool) {
+        guard caretReady, caretLayer.superlayer != nil else { return }
+
+        // Hide for ranged selections or when we're not the active insertion point.
+        let hasSelection = selectedRange().length > 0
+        let isActive = (window?.firstResponder === self) && (window?.isKeyWindow ?? false)
+        caretLayer.isHidden = hasSelection || !isActive
+        guard !caretLayer.isHidden else { return }
+
+        if let tc = textContainer { layoutManager?.ensureLayout(for: tc) }
+        let rect = caretRect()
+        let newPos = CGPoint(x: rect.midX, y: rect.midY)
+
+        stopBlink()
+
+        if animated, let pres = caretLayer.presentation() {
+            let move = CABasicAnimation(keyPath: "position")
+            move.fromValue = pres.position
+            move.toValue = newPos
+            move.duration = 0.09
+            move.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            caretLayer.add(move, forKey: "move")
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        caretLayer.bounds = CGRect(x: 0, y: 0, width: caretWidth, height: rect.height)
+        caretLayer.position = newPos
+        caretLayer.opacity = 1
+        CATransaction.commit()
+
+        scheduleBlink()
+    }
+
+    /// The caret rectangle in this (flipped) view's coordinate space.
+    private func caretRect() -> NSRect {
+        let origin = textContainerOrigin
+        guard let lm = layoutManager, let tc = textContainer, let ts = textStorage else {
+            return NSRect(x: origin.x, y: origin.y, width: caretWidth, height: 20)
+        }
+
+        let charIndex = selectedRange().location
+        let length = ts.length
+        let fallbackHeight = lm.defaultLineHeight(for: font ?? .systemFont(ofSize: 14))
+
+        // Empty document, or caret sitting on a trailing empty line.
+        if length == 0 || charIndex >= length {
+            let extra = lm.extraLineFragmentRect
+            if extra.height > 0 {
+                return NSRect(x: extra.minX + origin.x, y: extra.minY + origin.y,
+                              width: caretWidth, height: extra.height)
+            }
+            if length > 0 {
+                // Caret after the final glyph on its line.
+                let lastGlyph = lm.numberOfGlyphs - 1
+                let gr = lm.boundingRect(forGlyphRange: NSRange(location: lastGlyph, length: 1), in: tc)
+                return NSRect(x: gr.maxX + origin.x, y: gr.minY + origin.y,
+                              width: caretWidth, height: gr.height)
+            }
+            return NSRect(x: origin.x, y: origin.y, width: caretWidth, height: fallbackHeight)
+        }
+
+        // Caret immediately before the glyph at charIndex.
+        let glyphIndex = lm.glyphIndexForCharacter(at: charIndex)
+        let lineRect = lm.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+        let loc = lm.location(forGlyphAt: glyphIndex)
+        return NSRect(x: lineRect.minX + loc.x + origin.x,
+                      y: lineRect.minY + origin.y,
+                      width: caretWidth, height: lineRect.height)
+    }
+
+    // MARK: Blink (idle only, like a smooth writing caret)
+
+    private func scheduleBlink() {
+        blinkIdleTimer?.invalidate()
+        blinkIdleTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            self?.startBlink()
+        }
+    }
+
+    private func startBlink() {
+        guard !caretLayer.isHidden else { return }
+        let blink = CABasicAnimation(keyPath: "opacity")
+        blink.fromValue = 1
+        blink.toValue = 0
+        blink.duration = 0.53
+        blink.autoreverses = true
+        blink.repeatCount = .infinity
+        blink.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        caretLayer.add(blink, forKey: "blink")
+    }
+
+    private func stopBlink() {
+        caretLayer.removeAnimation(forKey: "blink")
+    }
+
+    // MARK: Caret update hooks
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        caretLayer.contentsScale = window?.backingScaleFactor ?? 2
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        updateCaret(animated: true)
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        updateCaret(animated: true)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        DispatchQueue.main.async { [weak self] in self?.updateCaret(animated: false) }
+        return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        caretLayer.isHidden = true
+        return ok
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "b" {
             toggleBold()
@@ -214,52 +429,62 @@ class CustomTextView: NSTextView {
     
     private func toggleBoldForRange(_ range: NSRange) {
         guard let textStorage = textStorage else { return }
-        
+
+        // Route through shouldChangeText/didChangeText so the change registers
+        // with the text view's undo manager and triggers autosave.
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
+
         textStorage.beginEditing()
-        
+
         textStorage.enumerateAttribute(.font, in: range) { value, subRange, _ in
             if let font = value as? NSFont {
                 let traits = font.fontDescriptor.symbolicTraits
                 let newFont: NSFont
-                
+
                 if traits.contains(.bold) {
                     newFont = NSFontManager.shared.convert(font, toNotHaveTrait: .boldFontMask)
                 } else {
                     newFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
                 }
-                
+
                 textStorage.addAttribute(.font, value: newFont, range: subRange)
             }
         }
-        
+
         textStorage.endEditing()
-        
+        didChangeText()
+
         // Also update typing attributes based on the font at cursor position
         updateTypingAttributesAtCursor()
     }
-    
+
     private func toggleItalicForRange(_ range: NSRange) {
         guard let textStorage = textStorage else { return }
-        
+
+        // Route through shouldChangeText/didChangeText so the change registers
+        // with the text view's undo manager and triggers autosave.
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
+
         textStorage.beginEditing()
-        
+
         textStorage.enumerateAttribute(.font, in: range) { value, subRange, _ in
             if let font = value as? NSFont {
                 let traits = font.fontDescriptor.symbolicTraits
                 let newFont: NSFont
-                
+
                 if traits.contains(.italic) {
                     newFont = NSFontManager.shared.convert(font, toNotHaveTrait: .italicFontMask)
                 } else {
                     newFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
                 }
-                
+
                 textStorage.addAttribute(.font, value: newFont, range: subRange)
             }
         }
-        
+
         textStorage.endEditing()
-        
+        didChangeText()
+
         // Also update typing attributes based on the font at cursor position
         updateTypingAttributesAtCursor()
     }
