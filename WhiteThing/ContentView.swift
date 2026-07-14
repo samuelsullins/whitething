@@ -42,7 +42,7 @@ struct ContentView: View {
         // top of the window, inline with the traffic lights, and reach the
         // bottom edge too.
         .ignoresSafeArea(.container, edges: [.top, .bottom])
-        .background(WindowConfigurator())
+        .background(WindowConfigurator(showControls: showMenu || !document.hasDocument))
         .animation(.easeInOut(duration: 0.2), value: showMenu)
         .onContinuousHover { phase in
             if document.hasDocument {
@@ -81,6 +81,10 @@ struct ContentView: View {
 /// window (including the title-bar strip) so our top menu aligns with the
 /// traffic-light controls.
 struct WindowConfigurator: NSViewRepresentable {
+    /// When false the traffic-light controls are hidden; they fade in while the
+    /// cursor is over the top strip (mirroring the top menu's visibility).
+    var showControls: Bool
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
@@ -89,9 +93,31 @@ struct WindowConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             window.isMovableByWindowBackground = true
+            applyControlVisibility(to: window)
         }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = nsView.window else { return }
+            applyControlVisibility(to: window)
+        }
+    }
+
+    /// Fade the three standard window buttons in/out with `showControls`.
+    private func applyControlVisibility(to window: NSWindow) {
+        let buttons = [
+            window.standardWindowButton(.closeButton),
+            window.standardWindowButton(.miniaturizeButton),
+            window.standardWindowButton(.zoomButton)
+        ].compactMap { $0 }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            for button in buttons {
+                button.animator().alphaValue = showControls ? 1 : 0
+            }
+        }
+    }
 }
