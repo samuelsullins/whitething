@@ -1,12 +1,12 @@
-# WhiteThing
+<img src="app_preview.jpeg" alt="White Thing screenshot" width="600">
 
-<p align="center">
-  <img src="app_preview.jpeg" alt="White Thing screenshot" width="600">
-</p>
+# WhiteThing
 
 A minimal (and I mean *minimal*) RTF text editor for macOS-allied fiction writers. Has dark/light modes and auto vanishing controls. Nicer editor than you've probably ever used. 
 
-WhiteThing is ideal for short stories!
+WhiteThing is ideal for short stories! I wouldn't use it for a full book, but up to novella length it's a joy to use.
+
+[Get it now](https://github.com/samuelsullins/whitething/releases/latest/download/WhiteThing.zip) 
 
 ## Features
 
