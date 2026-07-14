@@ -94,7 +94,10 @@ jobs:
       - name: Package
         run: |
           APP="$RUNNER_TEMP/export/$APP_NAME"
-          OUT="WhiteThing-${GITHUB_REF_NAME}.zip"
+          # Constant filename so the README can link to a permanent
+          # /releases/latest/download/WhiteThing.zip URL. The release tag/notes
+          # still carry the version, so nothing about versioning is lost.
+          OUT="WhiteThing.zip"
           ditto -c -k --keepParent "$APP" "$OUT"
           echo "ASSET=$OUT" >> "$GITHUB_ENV"
 
