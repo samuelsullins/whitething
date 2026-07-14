@@ -55,7 +55,7 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(document.isDarkMode ? .dark : .light)
+        .preferredColorScheme(document.theme.isDark ? .dark : .light)
         .onAppear {
             // Reopen the last document on launch (must live on a view that is
             // always present, not on the editor which only exists once a

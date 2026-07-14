@@ -67,12 +67,12 @@ struct MenuBarView: View {
             if document.hasDocument {
                 menuDivider
 
-                // Appearance: font toggle, dark-mode toggle, size stepper.
-                // Each label shows what a click switches *to*.
-                Button(document.isMono ? "Serif" : "Mono") { document.toggleFont() }
+                // Appearance: font toggle, theme cycle, size stepper.
+                // Both labels show the *current* state and switch on tap.
+                Button(document.isMono ? "Mono" : "Serif") { document.toggleFont() }
                     .buttonStyle(.plain)
 
-                Button(document.isDarkMode ? "Light" : "Dark") { document.toggleDarkMode() }
+                Button(document.theme.displayName) { document.cycleTheme() }
                     .buttonStyle(.plain)
 
                 CustomIncrementer(

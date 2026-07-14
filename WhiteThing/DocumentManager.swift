@@ -2,6 +2,50 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+/// The editor's visual themes. Tapping the theme button cycles through these in
+/// declaration order (Light → Green → Dark → Light …). Colors are a view-layer
+/// concern only — they're never written into the saved RTF.
+enum Theme: String, CaseIterable {
+    case light
+    case green
+    case dark
+
+    /// Name shown on the theme button — always the *current* theme, not the next.
+    var displayName: String {
+        switch self {
+        case .light: return "Light"
+        case .green: return "Green"
+        case .dark:  return "Dark"
+        }
+    }
+
+    /// Whether the window should adopt AppKit's dark appearance.
+    var isDark: Bool { self != .light }
+
+    var background: Color {
+        switch self {
+        case .light: return .white
+        case .green: return Color(.sRGB, red: 0x0b / 255, green: 0x1e / 255, blue: 0x1b / 255)
+        case .dark:  return .black
+        }
+    }
+
+    var foreground: Color {
+        switch self {
+        case .light: return .black
+        case .green: return Color(.sRGB, red: 0x66 / 255, green: 0xab / 255, blue: 0x94 / 255)
+        case .dark:  return .white
+        }
+    }
+
+    /// The next theme in the cycle, wrapping back to the start.
+    var next: Theme {
+        let all = Theme.allCases
+        let i = all.firstIndex(of: self) ?? 0
+        return all[(i + 1) % all.count]
+    }
+}
+
 class DocumentManager: NSObject, ObservableObject {
     @Published var filename = "untitled"
     @Published var folderName = "Desktop"
@@ -10,8 +54,8 @@ class DocumentManager: NSObject, ObservableObject {
     @Published var textAreaWidth: Double = 800   // width of the centered text column (pts)
     @Published var textColor = Color.black
     @Published var backgroundColor = Color.white
-    @Published var fontName = "Palatino"
-    @Published var isDarkMode = false
+    @Published var fontName = "CormorantGaramond-Regular"
+    @Published var theme: Theme = .light
 
     // Bumped whenever an appearance setting changes so the editor knows to
     // re-apply attributes across the whole document (instead of on every keystroke).
@@ -22,8 +66,9 @@ class DocumentManager: NSObject, ObservableObject {
     @Published var isMaximized = false
 
     // The two bundled typefaces the font toggle switches between.
-    private let monoFontName = "Courier"
-    private let serifFontName = "Palatino"
+    // These are PostScript names, not filenames — see the bundled .ttf files.
+    private let monoFontName = "RobotoMono-Regular"
+    private let serifFontName = "CormorantGaramond-Regular"
 
     var font: NSFont {
         NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
@@ -97,24 +142,18 @@ class DocumentManager: NSObject, ObservableObject {
         updateFontName(isMono ? serifFontName : monoFontName)
     }
 
-    func toggleDarkMode() {
-        isDarkMode.toggle()
+    // Advance to the next theme in the cycle (Light → Green → Dark → …).
+    func cycleTheme() {
+        theme = theme.next
         applyColorScheme()
         settingsVersion += 1
         saveSettings()
     }
 
-    // Derives the editor's text/background colors from the current mode.
-    // Custom palettes can be swapped in here later.
+    // Derives the editor's text/background colors from the current theme.
     func applyColorScheme() {
-        if isDarkMode {
-            // #0b1e1b background, #66ab93 text
-            backgroundColor = Color(.sRGB, red: 0x0b / 255, green: 0x1e / 255, blue: 0x1b / 255)
-            textColor = Color(.sRGB, red: 0x66 / 255, green: 0xab / 255, blue: 0x94 / 255)
-        } else {
-            backgroundColor = .white
-            textColor = .black
-        }
+        backgroundColor = theme.background
+        textColor = theme.foreground
     }
 
     func copyAll() {
@@ -418,7 +457,7 @@ class DocumentManager: NSObject, ObservableObject {
         defaults.set(horizontalPadding, forKey: "padding")
         defaults.set(textAreaWidth, forKey: "textAreaWidth")
         defaults.set(fontName, forKey: "fontName")
-        defaults.set(isDarkMode, forKey: "isDarkMode")
+        defaults.set(theme.rawValue, forKey: "theme")
     }
 
     func loadSettings() {
@@ -440,8 +479,13 @@ class DocumentManager: NSObject, ObservableObject {
         // Load font name
         fontName = defaults.string(forKey: "fontName") ?? serifFontName
 
-        // Load appearance mode and derive colors from it
-        isDarkMode = defaults.bool(forKey: "isDarkMode")
+        // Load the theme and derive colors from it. Migrate the legacy
+        // isDarkMode bool (true → Green, false → Light) for existing installs.
+        if let raw = defaults.string(forKey: "theme"), let saved = Theme(rawValue: raw) {
+            theme = saved
+        } else {
+            theme = defaults.bool(forKey: "isDarkMode") ? .green : .light
+        }
         applyColorScheme()
 
         // Restore the saved folder if it still exists, otherwise default to Desktop.
