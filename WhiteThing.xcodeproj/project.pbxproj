@@ -6,7 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		B712E04E3005FAF000AC5707 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = B712E04D3005FAF000AC5707 /* README.md */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		B712E04D3005FAF000AC5707 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		B7FBE3822E45299700CA2E0B /* WhiteThing.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhiteThing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -32,6 +37,7 @@
 		B7FBE3792E45299700CA2E0B = {
 			isa = PBXGroup;
 			children = (
+				B712E04D3005FAF000AC5707 /* README.md */,
 				B7FBE3842E45299700CA2E0B /* WhiteThing */,
 				B7FBE3832E45299700CA2E0B /* Products */,
 			);
@@ -55,7 +61,6 @@
 				B7FBE37E2E45299700CA2E0B /* Sources */,
 				B7FBE37F2E45299700CA2E0B /* Frameworks */,
 				B7FBE3802E45299700CA2E0B /* Resources */,
-				B712E03C3005483B00AC5707 /* Run Script */,
 			);
 			buildRules = (
 			);
@@ -110,32 +115,11 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B712E04E3005FAF000AC5707 /* README.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		B712E03C3005483B00AC5707 /* Run Script */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Run Script";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\n\"$SRCROOT/Scripts/install.sh\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B7FBE37E2E45299700CA2E0B /* Sources */ = {

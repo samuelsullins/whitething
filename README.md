@@ -1,40 +1,20 @@
-# White Thing
+# WhiteThing
 
-A minimal RTF text editor for macOS-allied fiction writers. Has customizable appearance and auto vanishing menu bar.
+A minimal (and I mean *minimal*) RTF text editor for macOS-allied fiction writers. Has dark/light modes and auto vanishing controls. Nicer editor than you've probably ever used. 
+
+WhiteThing is ideal for short stories!
 
 ## Features
 
-- **File Management**: Create, open, and save RTF documents
-- **Customizable Appearance**: 
-  - Text and background colors (hex input)
-  - Font selection from common typefaces or system font picker
-  - Adjustable font size (8-72pt)
-  - Variable horizontal padding (0-500px)
-- **Smart Interface**: Menu bar appears on hover, hides during typing
-- **Auto-save**: Documents save automatically when you type space
-- **Persistent Settings**: All appearance preferences saved between sessions - but font and color are UI-only, not saved to the RTF.
+- **Control Bar**: Hover at the top of the window to see the controls. Very self explanatory; can open an existing rtf file or make a new one. Rename or change where it's stored *very* easily.
+- **Opinionated Design**: I have locked many things to defaults that I personally believe are best for this. Colors, fonts, etc. You get to adjust some stuff, but not much. Focus on writing!
+- **Magic Save**: Never have to hit save. Automatically saves all the time.
+- **Persistent Settings**: Font and color are not saved into your RTF file; it's just a visual layer in the WhiteThing editor.
 - **Text Formatting**: Support for bold (⌘B) and italic (⌘I) - what else do you need?
+- **Easy Export**: WhiteThing is great for writing, but not formatting. Hit the Copy icon in the control bar and paste your whole manuscript into any other app.
 
-## Requirements
+## How To Get
+Click [here](https://github.com/samuelsullins/whitething/releases/download/v1.0.0/WhiteThing-v1.0.0.zip) to download.
 
-- macOS 12.0+
-- Xcode 14.0+
-
-## How to Run
-
-1. Clone the repository
-2. Open `WhiteThing.xcodeproj` in Xcode
-3. Select target device (Mac)
-4. Press ⌘R or click Run to test
-5. Archive and Distribute via Custom -> Copy App and then stick it in your Applications folder
-
-## Usage
-
-1. **First Launch**: Click "New" or "Open" to begin
-2. **File Management**: Click name of folder to change save location, click filename to rename
-3. **Appearance**: Adjust colors, fonts, and padding using the hover menu
-4. **Window Size**: Click "Big" to maximize window (automatically adjusts padding)
-
-## File Format
-
-Documents are saved as RTF (Rich Text Format) files with formatting stripped on save to maintain consistency with viewer preferences.
+## Why Did I Name It That
+Because if you have it in Light mode it is white, and it is also a thing. So it's actually a very descriptive name, which is somewhat rare for me.
