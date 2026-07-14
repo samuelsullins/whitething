@@ -18,7 +18,7 @@ WhiteThing is ideal for short stories! I wouldn't use it for a full book, but up
 - **Easy Export**: WhiteThing is great for writing, but not formatting. Hit the Copy icon in the control bar and paste your whole manuscript into any other app.
 
 ## How To Get
-Click [here](https://github.com/samuelsullins/whitething/releases/latest/download/WhiteThing.zip) to download the latest version.
+Click [here](https://github.com/samuelsullins/whitething/releases/latest/download/WhiteThing.zip) to download the latest version. Then stick it in your Applications folder.
 
 ## Why Did I Name It That
 Because if you have it in Light mode it is white, and it is also a thing. So it's actually a very descriptive name, which is somewhat rare for me.
