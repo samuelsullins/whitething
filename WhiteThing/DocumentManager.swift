@@ -46,6 +46,32 @@ enum Theme: String, CaseIterable {
     }
 }
 
+/// How much writing help the editor gives. The button cycles through these in
+/// declaration order and always shows the *current* mode.
+///   full           → every macOS text feature (spell check, autocorrect,
+///                     predictive/next-word, substitutions) plus capitalization.
+///   capitalization → only our lightweight auto-capitalizer; everything else off.
+///   off            → no help at all.
+enum SpellMode: String, CaseIterable {
+    case full
+    case capitalization
+    case off
+
+    var displayName: String {
+        switch self {
+        case .full:           return "Check and fix spelling"
+        case .capitalization: return "Just basic capitalization"
+        case .off:            return "No spell help"
+        }
+    }
+
+    var next: SpellMode {
+        let all = SpellMode.allCases
+        let i = all.firstIndex(of: self) ?? 0
+        return all[(i + 1) % all.count]
+    }
+}
+
 class DocumentManager: NSObject, ObservableObject {
     @Published var filename = "untitled"
     @Published var folderName = "Desktop"
@@ -56,6 +82,7 @@ class DocumentManager: NSObject, ObservableObject {
     @Published var backgroundColor = Color.white
     @Published var fontName = "CormorantGaramond-Regular"
     @Published var theme: Theme = .light
+    @Published var spellMode: SpellMode = .capitalization
 
     // Bumped whenever an appearance setting changes so the editor knows to
     // re-apply attributes across the whole document (instead of on every keystroke).
@@ -154,6 +181,33 @@ class DocumentManager: NSObject, ObservableObject {
     func applyColorScheme() {
         backgroundColor = theme.background
         textColor = theme.foreground
+    }
+
+    // Advance to the next writing-help mode and apply it live.
+    func cycleSpellMode() {
+        spellMode = spellMode.next
+        applySpellMode()
+        saveSettings()
+    }
+
+    // Push the current spell mode onto the text view. Safe to call before the
+    // text view exists (no-op) — EditorView also calls it once on setup.
+    func applySpellMode() {
+        guard let tv = textView else { return }
+        let full = spellMode == .full
+
+        tv.isContinuousSpellCheckingEnabled = full
+        tv.isGrammarCheckingEnabled = full
+        tv.isAutomaticSpellingCorrectionEnabled = full
+        tv.isAutomaticTextReplacementEnabled = full
+        tv.isAutomaticQuoteSubstitutionEnabled = full
+        tv.isAutomaticDashSubstitutionEnabled = full
+        tv.isAutomaticTextCompletionEnabled = full   // inline predictive / next-word
+        tv.isAutomaticDataDetectionEnabled = full
+        tv.isAutomaticLinkDetectionEnabled = full
+
+        // Our lightweight capitalizer stays on unless help is fully off.
+        (tv as? CustomTextView)?.autoCapitalizationEnabled = spellMode != .off
     }
 
     func copyAll() {
@@ -458,6 +512,7 @@ class DocumentManager: NSObject, ObservableObject {
         defaults.set(textAreaWidth, forKey: "textAreaWidth")
         defaults.set(fontName, forKey: "fontName")
         defaults.set(theme.rawValue, forKey: "theme")
+        defaults.set(spellMode.rawValue, forKey: "spellMode")
     }
 
     func loadSettings() {
@@ -487,6 +542,11 @@ class DocumentManager: NSObject, ObservableObject {
             theme = defaults.bool(forKey: "isDarkMode") ? .green : .light
         }
         applyColorScheme()
+
+        // Writing-help mode (defaults to just-capitalization for existing installs).
+        if let raw = defaults.string(forKey: "spellMode"), let saved = SpellMode(rawValue: raw) {
+            spellMode = saved
+        }
 
         // Restore the saved folder if it still exists, otherwise default to Desktop.
         if let path = defaults.string(forKey: "folderPath"),

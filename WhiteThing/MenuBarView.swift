@@ -16,6 +16,9 @@ struct MenuBarView: View {
     @State private var didCopy = false
     @FocusState private var isTextFieldFocused: Bool
 
+    // Eases the menu-bar reflow when a cycle button's label changes width.
+    private let cycleAnimation = Animation.easeInOut(duration: 0.18)
+
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             
@@ -69,11 +72,15 @@ struct MenuBarView: View {
 
                 // Appearance: font toggle, theme cycle, size stepper.
                 // Both labels show the *current* state and switch on tap.
-                Button(document.isMono ? "Mono" : "Serif") { document.toggleFont() }
-                    .buttonStyle(.plain)
+                Button(document.isMono ? "Mono" : "Serif") {
+                    withAnimation(cycleAnimation) { document.toggleFont() }
+                }
+                .buttonStyle(.plain)
 
-                Button(document.theme.displayName) { document.cycleTheme() }
-                    .buttonStyle(.plain)
+                Button(document.theme.displayName) {
+                    withAnimation(cycleAnimation) { document.cycleTheme() }
+                }
+                .buttonStyle(.plain)
 
                 CustomIncrementer(
                     value: Binding(
@@ -84,6 +91,14 @@ struct MenuBarView: View {
                     step: 1,
                     format: "%.0f"
                 )
+
+                menuDivider
+
+                // Writing help: cycles full spellcheck → capitalization only → off.
+                Button(document.spellMode.displayName) {
+                    withAnimation(cycleAnimation) { document.cycleSpellMode() }
+                }
+                .buttonStyle(.plain)
 
                 menuDivider
 
@@ -117,11 +132,11 @@ struct MenuBarView: View {
             if document.hasDocument {
                 Text("\(document.wordCount) words")
 
-                Button(action: copyAll) {
-                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .help("Copy all text")
+                menuDivider
+
+                Button(didCopy ? "Copied!" : "Copy them") { copyAll() }
+                    .buttonStyle(.plain)
+                    .help("Copy all text")
             }
         }
         .opacity(0.7)

@@ -12,9 +12,6 @@ struct EditorView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.isRichText = true
         textView.allowsUndo = true
-        textView.isAutomaticQuoteSubstitutionEnabled = true
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
         textView.backgroundColor = NSColor(document.backgroundColor)
         textView.drawsBackground = true
         textView.isVerticallyResizable = true
@@ -43,6 +40,7 @@ struct EditorView: NSViewRepresentable {
 
         context.coordinator.textView = textView
         document.textView = textView
+        document.applySpellMode()
 
         return scrollView
     }
@@ -296,6 +294,12 @@ class CustomTextView: NSTextView {
         scheduleBlink()
     }
 
+    /// First-line indent for the paragraph the caret is about to type into,
+    /// taken from the current typing attributes (falls back to 0).
+    private var caretFirstLineIndent: CGFloat {
+        (typingAttributes[.paragraphStyle] as? NSParagraphStyle)?.firstLineHeadIndent ?? 0
+    }
+
     /// The caret rectangle in this (flipped) view's coordinate space.
     private func caretRect() -> NSRect {
         let origin = textContainerOrigin
@@ -307,21 +311,25 @@ class CustomTextView: NSTextView {
         let length = ts.length
         let fallbackHeight = lm.defaultLineHeight(for: font ?? .systemFont(ofSize: 14))
 
-        // Empty document, or caret sitting on a trailing empty line.
+        // Empty document, or caret sitting on a trailing empty line. These land
+        // at the start of a paragraph's first line, so the caret must sit at the
+        // paragraph's firstLineHeadIndent — otherwise it shows at the margin and
+        // visibly jumps to the indent as soon as the first glyph is laid out.
         if length == 0 || charIndex >= length {
+            let indent = caretFirstLineIndent
             let extra = lm.extraLineFragmentRect
             if extra.height > 0 {
-                return NSRect(x: extra.minX + origin.x, y: extra.minY + origin.y,
+                return NSRect(x: extra.minX + origin.x + indent, y: extra.minY + origin.y,
                               width: caretWidth, height: extra.height)
             }
             if length > 0 {
-                // Caret after the final glyph on its line.
+                // Caret after the final glyph on its line (already includes indent).
                 let lastGlyph = lm.numberOfGlyphs - 1
                 let gr = lm.boundingRect(forGlyphRange: NSRange(location: lastGlyph, length: 1), in: tc)
                 return NSRect(x: gr.maxX + origin.x, y: gr.minY + origin.y,
                               width: caretWidth, height: gr.height)
             }
-            return NSRect(x: origin.x, y: origin.y, width: caretWidth, height: fallbackHeight)
+            return NSRect(x: origin.x + indent, y: origin.y, width: caretWidth, height: fallbackHeight)
         }
 
         // Caret immediately before the glyph at charIndex.
@@ -535,10 +543,104 @@ class CustomTextView: NSTextView {
     // Override to maintain formatting when moving cursor
     override func setSelectedRange(_ charRange: NSRange) {
         super.setSelectedRange(charRange)
-        
+
         // When cursor moves, update typing attributes to match the character before cursor
         if charRange.length == 0 && charRange.location > 0 {
             updateTypingAttributesAtCursor()
         }
+    }
+
+    // MARK: - Auto-capitalization
+    //
+    // Gently fixes sentence starts and a lone "i" as you type. Deliberately
+    // low-key: it only acts on single keystrokes typed at the very end of the
+    // document, so it never reaches back and re-forces text you've gone back to
+    // edit. Each fix is a normal, undoable edit.
+    var autoCapitalizationEnabled = true
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        super.insertText(string, replacementRange: replacementRange)
+        guard autoCapitalizationEnabled else { return }
+
+        // Only real, single-character typing — leave paste/dictation alone.
+        let inserted = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
+        guard inserted.count == 1 else { return }
+
+        // Only while appending at the very end of the document. This is what
+        // keeps it from fighting you when you go back to fix something earlier.
+        guard let ts = textStorage else { return }
+        let caret = selectedRange()
+        guard caret.length == 0, caret.location == ts.length else { return }
+
+        autoCapitalizeAtTail()
+    }
+
+    private func autoCapitalizeAtTail() {
+        guard let ts = textStorage else { return }
+        let ns = ts.string as NSString
+        let len = ns.length
+        guard len > 0 else { return }
+
+        let lastIdx = len - 1
+        guard let lastScalar = UnicodeScalar(ns.character(at: lastIdx)) else { return }
+        let last = Character(lastScalar)
+
+        if last.isLetter {
+            // Just typed a letter: capitalize it if it opens a sentence.
+            if last.isLowercase && isSentenceStart(in: ns, letterIndex: lastIdx) {
+                replaceCapitalizing(at: lastIdx, with: String(last).uppercased())
+            }
+        } else {
+            // Just typed a boundary: if the finished word is a lone "i", fix it.
+            capitalizeStandaloneI(before: lastIdx, in: ns)
+        }
+    }
+
+    /// True if the letter at `idx` begins a sentence: preceded (ignoring spaces
+    /// and tabs) by the document start, a newline, or `.` / `!` / `?`.
+    private func isSentenceStart(in ns: NSString, letterIndex idx: Int) -> Bool {
+        var i = idx - 1
+        while i >= 0 {
+            guard let s = UnicodeScalar(ns.character(at: i)) else { return false }
+            let c = Character(s)
+            if c == " " || c == "\t" { i -= 1; continue }
+            if c.isNewline { return true }
+            if c == "." || c == "!" || c == "?" { return true }
+            return false
+        }
+        return true // only whitespace back to the start of the document
+    }
+
+    /// If the word ending just before `boundaryIndex` is a lone "i" (or an
+    /// "i'm"/"i've"/"i'll"/"i'd" style contraction), capitalize its leading i.
+    private func capitalizeStandaloneI(before boundaryIndex: Int, in ns: NSString) {
+        let end = boundaryIndex // exclusive end of the word
+        var start = boundaryIndex - 1
+        while start >= 0 {
+            guard let s = UnicodeScalar(ns.character(at: start)) else { break }
+            let c = Character(s)
+            if c.isLetter || c == "'" || c == "\u{2019}" { start -= 1 } else { break }
+        }
+        start += 1
+        guard start < end else { return }
+
+        let word = ns.substring(with: NSRange(location: start, length: end - start))
+        guard word.first == "i" else { return } // already "I", or not an i-word
+        let lower = word.lowercased()
+        let isIWord = lower == "i" || lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}")
+        guard isIWord else { return }
+
+        replaceCapitalizing(at: start, with: "I")
+    }
+
+    /// Replace the single character at `index` with `replacement`, preserving its
+    /// attributes and routing through undo/autosave.
+    private func replaceCapitalizing(at index: Int, with replacement: String) {
+        guard let ts = textStorage else { return }
+        let range = NSRange(location: index, length: 1)
+        guard shouldChangeText(in: range, replacementString: replacement) else { return }
+        let attrs = ts.attributes(at: index, effectiveRange: nil)
+        ts.replaceCharacters(in: range, with: NSAttributedString(string: replacement, attributes: attrs))
+        didChangeText()
     }
 }

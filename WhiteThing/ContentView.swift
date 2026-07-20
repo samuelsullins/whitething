@@ -43,15 +43,14 @@ struct ContentView: View {
         // bottom edge too.
         .ignoresSafeArea(.container, edges: [.top, .bottom])
         .background(WindowConfigurator(showControls: showMenu || !document.hasDocument))
-        .animation(.easeInOut(duration: 0.2), value: showMenu)
         .onContinuousHover { phase in
             if document.hasDocument {
                 switch phase {
                 case .active(let location):
                     mouseLocation = location
-                    checkMenuVisibility(location: location)
+                    setMenu(visible: location.y < menuBarHeight)
                 case .ended:
-                    showMenu = false
+                    setMenu(visible: false)
                 }
             }
         }
@@ -68,8 +67,9 @@ struct ContentView: View {
     // actually over it (no larger "near" trigger zone).
     private let menuBarHeight: CGFloat = 30
 
-    private func checkMenuVisibility(location: CGPoint) {
-        showMenu = location.y < menuBarHeight
+    private func setMenu(visible: Bool) {
+        guard visible != showMenu else { return }
+        withAnimation(.easeInOut(duration: 0.28)) { showMenu = visible }
     }
 }
 
